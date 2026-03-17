@@ -5,7 +5,6 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
-	"flag"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -30,47 +29,19 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func LoadConfig(path string, envFile string) (err error) {
-	// (config Config, err error) {
-
-	if err := godotenv.Load(envFile); err != nil {
-		log.Printf("Info: No %s file found, relying on System Environment Variables\n", envFile)
-	} else {
-		log.Printf("Success: Loaded environment variables from %s\n", envFile)
-	}
-
-	return
-}
-
-// --- Chat and Signaling ---
-
 const (
-	MsgTypeChat      = 1   // User chat message
-	MsgTypeOffer     = 100 // Inbound Offer from a new viewer
-	MsgTypeCandidate = 101 // Inbound ICE Candidate from a viewer
-	MsgTypeAnswer    = 102 // Outbound Answer to a viewer
-
-	// Relay datachannel messages to viewers via websocket.
+	MsgTypeChat            = 1   // User chat message
+	MsgTypeOffer           = 100 // Inbound Offer from a new viewer
+	MsgTypeCandidate       = 101 // Inbound ICE Candidate from a viewer
+	MsgTypeAnswer          = 102 // Outbound Answer to a viewer
 	MsgTypeRelayChat       = 200 // Outbound Relay Chat to all viewers
 	MsgTypeRelayPointEvent = 201 // Outbound Relay Point Event to all viewers
-
-	// Got turn server information from signaling server
-	MsgTypeTurnInfo = 900
 )
 
 type Connection struct {
 	Socket *websocket.Conn
 	mu     sync.Mutex
 }
-
-type TurnServerInfo struct {
-	URLs           []string `json:"urls"`
-	Username       string   `json:"username"`
-	Credential     string   `json:"credential"`
-	CredentialType string   `json:"credentialType"`
-}
-
-var turnServerInfo TurnServerInfo
 
 // Work around for sending messages back to the client.
 type MessageType struct {
@@ -85,35 +56,6 @@ type MessageType struct {
 
 type ChatResponseType struct {
 	Response string `json:"response"`
-}
-
-// Helper to convert our TurnServerInfo to webrtc.ICEServer
-func (t TurnServerInfo) ToICEServers() []webrtc.ICEServer {
-	// 1. Elegant Empty Check: If we have no URLs, return nothing.
-	if len(t.URLs) == 0 {
-		return nil
-	}
-
-	var targetType webrtc.ICECredentialType
-
-	switch t.CredentialType {
-	case "password":
-		targetType = webrtc.ICECredentialTypePassword
-	case "oauth":
-		targetType = webrtc.ICECredentialTypeOauth
-	default:
-		// Default to password if undefined or empty
-		targetType = webrtc.ICECredentialTypePassword
-	}
-	// 3. Return the properly constructed slice
-	return []webrtc.ICEServer{
-		{
-			URLs:           t.URLs,
-			Username:       t.Username,
-			Credential:     t.Credential,
-			CredentialType: targetType,
-		},
-	}
 }
 
 // PeerManager holds all active peer connections
@@ -155,7 +97,16 @@ func (pm *PeerManager) AddPeer(
 
 	// Create a new PeerConnection
 	peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{
-		ICEServers: turnServerInfo.ToICEServers(),
+		ICEServers: []webrtc.ICEServer{
+			{
+				URLs: []string{
+					os.Getenv("TURN_SERVER"),
+				},
+				Username:       os.Getenv("TURN_USER"),
+				Credential:     os.Getenv("TURN_PASS"),
+				CredentialType: webrtc.ICECredentialTypePassword,
+			},
+		},
 	})
 	if err != nil {
 		log.Printf("ERROR: Failed to create PeerConnection for %s: %v", uid, err)
@@ -195,7 +146,6 @@ func (pm *PeerManager) AddPeer(
 
 				switch usermessage.Msgtype {
 				case 1:
-					fmt.Println("Got User message type 1")					
 					// relay message back for other spectators via websocket.
 					sendMessageWS(ws, MsgTypeRelayChat, usermessage.Msgarg, usermessage.Msgsrc, usermessage.Msgtext, usermessage.Msgparam1, usermessage.Msgparam2)
 					postBody, _ := json.Marshal(map[string]string{
@@ -472,14 +422,9 @@ func NewStreamID() string {
 
 func main() {
 
-	// 1. Parse command line flags
-	envFile := flag.String("env", ".env", "Path to environment file (e.g., .env.prod, .env.sandbox)")
-	flag.Parse()
-
-	// 2. Load Config using it
-	err := LoadConfig("./config", *envFile)
+	err := godotenv.Load()
 	if err != nil {
-		log.Fatalf("cannot load config: %v", err)
+		log.Fatal("Error loading configuration from .env")
 	}
 
 	WS_URL := os.Getenv("WS_URL")
@@ -531,9 +476,14 @@ func main() {
 	// b = broadcaster.
 	u := url.URL{Scheme: WS_URLSCHEME, Host: WS_URL, Path: WS_PATH}
 	q := u.Query()
-	q.Add("role", os.Getenv("NODE_TYPE"))
-	q.Add("token", os.Getenv("NODE_TOKEN"))
-	q.Add("node_id", os.Getenv("NODE_ID"))
+	q.Add("type", os.Getenv("WS_QUERY_TYPE"))
+	q.Add("uid", os.Getenv("WS_QUERY_UID"))
+	q.Add("token", os.Getenv("WS_QUERY_TOKEN"))
+	q.Add("roomid", os.Getenv("ROOM_ID"))
+	q.Add("roomname", os.Getenv("ROOM_NAME"))
+	q.Add("roomkey", os.Getenv("ROOM_KEY"))
+	q.Add("role", "robot")
+
 	u.RawQuery = q.Encode()
 
 	log.Printf("connecting to %s", u.String())
@@ -594,14 +544,6 @@ func main() {
 
 			// Route message based on Msgtype
 			switch message.Msgtype {
-			case MsgTypeTurnInfo:
-				// Got TURN server info from signaling server
-				log.Printf("Received TURN server info: %s", message.Msgtext)
-				if err := json.Unmarshal([]byte(message.Msgtext), &turnServerInfo); err != nil {
-					log.Printf("ERROR: Failed to unmarshal TURN info: %v", err)
-					continue
-				}
-				log.Printf("TURN URLs: %v", turnServerInfo.URLs)
 			case MsgTypeOffer:
 				// An offer from a new viewer
 				log.Printf("Received Offer from %s", message.Msgsrc)

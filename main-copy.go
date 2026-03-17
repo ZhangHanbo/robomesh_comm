@@ -5,7 +5,6 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
-	"flag"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -195,7 +194,6 @@ func (pm *PeerManager) AddPeer(
 
 				switch usermessage.Msgtype {
 				case 1:
-					fmt.Println("Got User message type 1")					
 					// relay message back for other spectators via websocket.
 					sendMessageWS(ws, MsgTypeRelayChat, usermessage.Msgarg, usermessage.Msgsrc, usermessage.Msgtext, usermessage.Msgparam1, usermessage.Msgparam2)
 					postBody, _ := json.Marshal(map[string]string{
@@ -597,11 +595,12 @@ func main() {
 			case MsgTypeTurnInfo:
 				// Got TURN server info from signaling server
 				log.Printf("Received TURN server info: %s", message.Msgtext)
-				if err := json.Unmarshal([]byte(message.Msgtext), &turnServerInfo); err != nil {
+				var turnInfo TurnServerInfo
+				if err := json.Unmarshal([]byte(message.Msgtext), &turnInfo); err != nil {
 					log.Printf("ERROR: Failed to unmarshal TURN info: %v", err)
 					continue
 				}
-				log.Printf("TURN URLs: %v", turnServerInfo.URLs)
+				log.Printf("TURN URLs: %v", turnInfo.URLs)
 			case MsgTypeOffer:
 				// An offer from a new viewer
 				log.Printf("Received Offer from %s", message.Msgsrc)

@@ -1,0 +1,15 @@
+# Robomesh Server
+WS_URLSCHEME='wss'
+WS_URL='tom-bridge.nusssi.com'
+WS_PATH='/wsbridge'
+
+# Node-specific settings
+NODE_TYPE='robot'
+NODE_ID='HELLOWORLD'
+NODE_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiYXVkIjpbImZhc3RhcGktdXNlcnM6YXV0aCJdLCJyb2xlIjoicm9ib3Rfc2VydmVyIiwidHlwZSI6InNlcnZpY2VfdG9rZW4ifQ.w6FtHOlfUspFDOhjZDXQdAec5VHZxlwphoQWAnX8Jyw
+
+# Local settings for RTP streaming
+RTP_VIDEO_PORT=5004
+RTP_VIDEO_IP=127.0.0.1
+RTP_AUDIO_PORT=5006
+RTP_AUDIO_IP=127.0.0.1

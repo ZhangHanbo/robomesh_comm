@@ -3,16 +3,14 @@
 package main
 
 import (
-	"bytes"
 	"crypto/rand"
 	"flag"
+	mrand "math/rand"
+
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
-	"io/ioutil"
 	"log"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -140,7 +138,6 @@ func (pm *PeerManager) AddPeer(
 	audioRTCPConn *net.UDPConn,
 	ws *Connection, // WebSocket connection to send replies
 	offer webrtc.SessionDescription,
-	workstationIP string,
 ) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
@@ -195,47 +192,61 @@ func (pm *PeerManager) AddPeer(
 
 				switch usermessage.Msgtype {
 				case 1:
-					fmt.Println("Got User message type 1")					
 					// relay message back for other spectators via websocket.
 					sendMessageWS(ws, MsgTypeRelayChat, usermessage.Msgarg, usermessage.Msgsrc, usermessage.Msgtext, usermessage.Msgparam1, usermessage.Msgparam2)
-					postBody, _ := json.Marshal(map[string]string{
-						"text": usermessage.Msgtext,
-					})
-					responseBody := bytes.NewBuffer(postBody)
-					response, err := http.Post("http://"+workstationIP+":11111/chat", "application/json", responseBody)
-					defer response.Body.Close()
-					body, err := ioutil.ReadAll(response.Body)
-					if err != nil {
-						log.Fatalf("An Error Occured %v", err)
-					}
-					// Unmarshal
-					var chatResponse ChatResponseType
-					json.Unmarshal(body, &chatResponse)
-					// fmt.Println(chatResponse.Response)
-
-					// sendMessageWS(connection, 1, "plain", "robi", chatResponse.Response, 0, 0)
-
-					// fmt.Printf("Response: %v", repsonse)
-					//Handle Error
-					if err != nil {
-						log.Fatalf("An Error Occured %v", err)
-					}
 					// FOR TEST: -- Pong back the same message to client, via websocket.
+
+					// Simulated wait for 0.2-5sec
+					time.Sleep(time.Duration(100+mrand.Intn(1000)) * time.Millisecond)
+
+					msgs := []string{
+						"Let me think about that...",
+						"Hmm...",
+						"Okay...",
+						"Processing your request...",
+						"One moment please...",
+					}
+
+					// // Create dictionary of data
+					// type MsgItem struct {
+					// 	Type string `json:"type"`
+					// 	Text string `json:"text"`
+					// }
+					// var msgs []MsgItem
+
+					// msgs = append(msgs, MsgItem{Type: "info", Text: "Let me think about that..."})
+					// msgs = append(msgs, MsgItem{Type: "info", Text: "Hmm..."})
+					// msgs = append(msgs, MsgItem{Type: "info", Text: "Okay..."})
+					// msgs = append(msgs, MsgItem{Type: "info", Text: "Processing your request..."})
+					// msgs = append(msgs, MsgItem{Type: "info", Text: "One moment please..."})
+
+					// Pack as a JSON array list, and send back
+					// Marshal the slice into a JSON byte slice
+					jsonData, err := json.Marshal(msgs)
+					if err != nil {
+						log.Printf("ERROR: Failed to marshal JSON: %v", err)
+					} else {
+						log.Printf("DEBUG: Sending JSON data: %s", string(jsonData))
+					}
+
+					sendMessageWS(ws, 1, "plain", "robi", string(jsonData), 0, 0)
+					// sendMessageWS(ws, 1, "plain", "robi", "I understand. Let's see how to do this.", 0, 0)
+
+					// Simulated wait for 0.2-5sec
+					time.Sleep(time.Duration(2000+mrand.Intn(4800)) * time.Millisecond)
+
 					// TODO: Please use this for sending any other message back
-					// sendMessageWS(ws, 1, "plain", "robi", usermessage.Msgtext, 0, 0)
+					sendMessageWS(ws, 1, "plain", "robi", "Here's your message: "+usermessage.Msgtext, 0, 0)
+
+					// Simulated wait for 0.2-5sec
+					time.Sleep(time.Duration(2000+mrand.Intn(4800)) * time.Millisecond)
+
+					sendMessageWS(ws, 1, "plain", "robi", "I've done it. Hope that works!", 0, 0)
+					sendMessageWS(ws, 1, "plain", "robi", "end", 0, 0)
+
 				case 10:
 					// relay point event back for other spectators via websocket.
 					sendMessageWS(ws, MsgTypeRelayPointEvent, usermessage.Msgarg, usermessage.Msgsrc, usermessage.Msgtext, usermessage.Msgparam1, usermessage.Msgparam2)
-					fmt.Println("User message type 10")
-					fmt.Println(usermessage.Msgarg)
-					postBody, _ := json.Marshal(map[string]string{
-						"point": usermessage.Msgarg,
-					})
-					responseBody := bytes.NewBuffer(postBody)
-					_, err := http.Post("http://"+workstationIP+":11111/point", "application/json", responseBody)
-					if err != nil {
-						log.Fatalf("An Error Occured %v", err)
-					}
 				default:
 					log.Printf("Unknown user message type")
 				}
@@ -399,49 +410,6 @@ func (c *Connection) Send(message []byte) error {
 	return c.Socket.WriteMessage(websocket.TextMessage, message)
 }
 
-func setupTCPServer(port int, connection *Connection) {
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		log.Fatalf("Error starting TCP server: %v", err)
-	}
-	defer listener.Close()
-
-	log.Printf("Listening for incoming messages on port %d", port)
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Fatalf("Error accepting connection: %v", err)
-		}
-
-		// Handle the incoming message in a separate goroutine
-		go handleTCPConnection(conn, connection)
-	}
-}
-
-func handleTCPConnection(conn net.Conn, connection *Connection) {
-	defer conn.Close()
-
-	// Read the incoming message
-	messageBuffer := make([]byte, 1024)
-	n, err := conn.Read(messageBuffer)
-	if err != nil {
-		log.Printf("Error reading from connection: %v", err)
-		return
-	}
-
-	// Assuming the message is a string, convert it to a string
-	message := string(messageBuffer[:n])
-	log.Printf("Received message: %s", message)
-
-	// Send the received message to the WebRTC peer through WebSocket
-	if message != "end" {
-		sendMessageWS(connection, 1, "plain", "robi", message, 0, 0)
-	} else {
-		sendMessageWS(connection, 1, "plain", "robi", "end", 1, 0)
-	}
-}
-
 func sendMessageWS(connection *Connection, msgtype int, msgarg string, msgsrc string, msgstr string, msgparam1 int, msgparam2 int) {
 	// Try sending back through the websocket.
 	msgpack := MessageType{
@@ -496,9 +464,14 @@ func main() {
 		log.Fatalf("Failed to parse RTP_AUDIO_PORT: %v", err)
 		RTP_AUDIO_PORT = 5006
 	}
-	RTP_AUDIO_IP := os.Getenv("RTP_AUDIO_IP")
 	RTP_VIDEO_IP := os.Getenv("RTP_VIDEO_IP")
-	WORKSTATION_IP := os.Getenv("WORKSTATION_IP")
+	if RTP_VIDEO_IP == "" {
+		RTP_VIDEO_IP = "127.0.0.1"
+	}
+	RTP_AUDIO_IP := os.Getenv("RTP_AUDIO_IP")
+	if RTP_AUDIO_IP == "" {
+		RTP_AUDIO_IP = "127.0.0.1"
+	}
 
 	// Exit signal
 	interrupt := make(chan os.Signal, 1)
@@ -548,11 +521,9 @@ func main() {
 	connection := new(Connection)
 	connection.Socket = wsconn
 
-	// Start TCP server on a specified port, e.g., 8080
-	go setupTCPServer(8080, connection)
-
 	done := make(chan struct{})
 
+	// Create streamid (video audio need to share the same streamid for webrtc multiplexing)
 	streamid := NewStreamID()
 	log.Printf("Using Stream ID: %s", streamid)
 
@@ -568,8 +539,8 @@ func main() {
 		panic(err)
 	}
 
-	go rtpToTrack(videoTrack, &codecs.VP8Packet{}, 90000, RTP_VIDEO_IP, RTP_VIDEO_PORT)
-	go rtpToTrack(audioTrack, &codecs.OpusPacket{}, 48000, RTP_AUDIO_IP, RTP_AUDIO_PORT)
+	go rtpToTrack(videoTrack, &codecs.VP8Packet{}, 90000, "127.0.0.1", RTP_VIDEO_PORT)
+	go rtpToTrack(audioTrack, &codecs.OpusPacket{}, 48000, "127.0.0.1", RTP_AUDIO_PORT)
 
 	peerManager := NewPeerManager()
 
@@ -597,11 +568,12 @@ func main() {
 			case MsgTypeTurnInfo:
 				// Got TURN server info from signaling server
 				log.Printf("Received TURN server info: %s", message.Msgtext)
-				if err := json.Unmarshal([]byte(message.Msgtext), &turnServerInfo); err != nil {
+				var turnInfo TurnServerInfo
+				if err := json.Unmarshal([]byte(message.Msgtext), &turnInfo); err != nil {
 					log.Printf("ERROR: Failed to unmarshal TURN info: %v", err)
 					continue
 				}
-				log.Printf("TURN URLs: %v", turnServerInfo.URLs)
+				log.Printf("TURN URLs: %v", turnInfo.URLs)
 			case MsgTypeOffer:
 				// An offer from a new viewer
 				log.Printf("Received Offer from %s", message.Msgsrc)
@@ -611,7 +583,7 @@ func main() {
 					continue
 				}
 				// Pass all necessary components to create a new peer
-				peerManager.AddPeer(message.Msgsrc, videoTrack, audioTrack, videoRTCPConn, audioRTCPConn, connection, offer, WORKSTATION_IP)
+				peerManager.AddPeer(message.Msgsrc, videoTrack, audioTrack, videoRTCPConn, audioRTCPConn, connection, offer)
 
 			case MsgTypeCandidate:
 				// A candidate from an existing viewer
@@ -625,7 +597,7 @@ func main() {
 				// You could broadcast this to all data channels if you want to bridge them:
 				// peerManager.BroadcastDataChannelMessage("server-ws", []byte(message.Msgtext))
 
-				// Or just echo back as you were:
+				// just echo back as you were:
 				sendMessageWS(connection, MsgTypeChat, "plain", message.Msgsrc, message.Msgtext, 0, 0)
 
 			default:
